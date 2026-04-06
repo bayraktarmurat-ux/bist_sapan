@@ -185,6 +185,9 @@ with tab1:
                     <div style="font-size:12px;color:{gun_renk};font-weight:600">{gun} / {zaman_stopu} gün</div>
                 </div>""", unsafe_allow_html=True)
 
+                guncel_str = f"{guncel:.2f}" if guncel else "—"
+                guncel_renk = "metric-pos" if guncel and guncel > giris else "metric-neg" if guncel else "metric-neu"
+
                 c2.markdown(f"""<div class="metric-card">
                     <div class="metric-label">Giriş</div>
                     <div class="metric-value metric-neu">{giris:.2f}</div>
@@ -192,7 +195,7 @@ with tab1:
 
                 c3.markdown(f"""<div class="metric-card">
                     <div class="metric-label">Güncel</div>
-                    <div class="metric-value {'metric-pos' if guncel and guncel>giris else 'metric-neg' if guncel else 'metric-neu'}">{guncel:.2f if guncel else '—'}</div>
+                    <div class="metric-value {guncel_renk}">{guncel_str}</div>
                 </div>""", unsafe_allow_html=True)
 
                 c4.markdown(f"""<div class="metric-card">
