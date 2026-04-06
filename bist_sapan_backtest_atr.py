@@ -297,16 +297,22 @@ poz_yuzde    = st.sidebar.slider("Pozisyon Büyüklüğü (%)", 5.0, 50.0,
                                   round(100/max_pozisyon, 1), 5.0)
 
 st.sidebar.markdown("### 📐 Strateji Parametreleri")
-ema_tolerans = st.sidebar.slider(
-    "EMA Dokunuş Toleransı (%)", 0.5, 5.0, 2.0, 0.5,
+ema_tolerans = st.sidebar.select_slider(
+    "EMA Dokunuş Toleransı (%)",
+    options=[1, 2, 3],
+    value=2,
     help="Mumun EMA'ya kaç % yakınına gelmesi dokunuş sayılır"
 ) / 100
 
-atr_kat = st.sidebar.slider("ATR Katsayısı (Stop)", 0.5, 3.0, 1.5, 0.5,
-    help="Stop = Giriş - ATR × Katsayı")
+atr_kat = st.sidebar.select_slider(
+    "ATR Katsayısı (Stop)",
+    options=[1.0, 1.5, 2.0, 2.5, 3.0],
+    value=1.5,
+    help="Stop = Giriş - ATR × Katsayı"
+)
 atr_per = st.sidebar.slider("ATR Periyodu", 7, 21, 14, 1)
 rr_kat  = st.sidebar.select_slider("R:R Katsayısı",
-    options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0], value=2.5)
+    options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0], value=1.5)
 
 zaman_stopu = st.sidebar.slider(
     "Zaman Stopu (gün)", 5, 30, 18, 1,
@@ -591,7 +597,7 @@ if "kapali" in st.session_state:
     st.markdown("---")
 
     # Sekmeler
-    tab1, tab2, tab3 = st.tabs(["💰 Portföy Eğrisi", "📅 Aylık Performans", "📋 İşlem Listesi"])
+    tab1, tab2, tab3, tab4 = st.tabs(["💰 Portföy Eğrisi", "📅 Aylık Performans", "📆 Yıllık Performans", "📋 İşlem Listesi"])
 
     with tab1:
         df_i["Kapanış_dt"] = pd.to_datetime(df_i["Kapanış"], format="%d.%m.%Y")
@@ -646,6 +652,64 @@ if "kapali" in st.session_state:
         st.dataframe(aylik_goster, use_container_width=True, hide_index=True)
 
     with tab3:
+        df_i["Yil"] = df_i["Kapanış_dt"].dt.year
+        yillik_list = []
+        portfoy_bas = portfoy0
+        for yil in sorted(df_i["Yil"].unique()):
+            sub = df_i[df_i["Yil"] == yil]
+            kz  = sub["K/Z (TL)"].sum()
+            portfoy_son = portfoy_bas + kz
+            getiri_yil  = kz / portfoy_bas * 100
+            tamam_yil   = sub[sub["Sonuç"].isin(["✅ Hedef","❌ Stop","⏱️ Zaman"])]
+            kaz_yil     = (sub["Sonuç"] == "✅ Hedef").sum()
+            kay_yil     = (sub["Sonuç"] == "❌ Stop").sum()
+            wr_yil      = kaz_yil / len(tamam_yil) * 100 if len(tamam_yil) > 0 else 0
+            yillik_list.append({
+                "Yıl"          : yil,
+                "Başlangıç TL" : round(portfoy_bas, 0),
+                "Bitiş TL"     : round(portfoy_son, 0),
+                "K/Z (TL)"     : round(kz, 0),
+                "Getiri %"     : round(getiri_yil, 1),
+                "Win Rate %"   : round(wr_yil, 1),
+                "Toplam İşlem" : len(tamam_yil),
+                "Kazanan"      : int(kaz_yil),
+                "Kaybeden"     : int(kay_yil),
+            })
+            portfoy_bas = portfoy_son
+
+        df_yil = pd.DataFrame(yillik_list)
+
+        # Yıllık getiri bar grafik
+        fig3 = go.Figure()
+        fig3.add_trace(go.Bar(
+            x=df_yil["Yıl"].astype(str),
+            y=df_yil["Getiri %"],
+            marker_color=[("#3fb950" if v >= 0 else "#ef4444") for v in df_yil["Getiri %"]],
+            text=[f"{v:+.1f}%" for v in df_yil["Getiri %"]],
+            textposition="outside",
+            name="Yıllık Getiri"
+        ))
+        fig3.add_hline(y=0, line_dash="dot", line_color="#64748b", line_width=1)
+        fig3.update_layout(
+            template="plotly_dark", paper_bgcolor="#0d0f14",
+            plot_bgcolor="#0d0f14", height=320,
+            margin=dict(l=10,r=10,t=30,b=10),
+            yaxis=dict(gridcolor="#1e293b", ticksuffix="%"),
+            xaxis=dict(gridcolor="#1e293b"),
+            showlegend=False,
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+        # Yıllık tablo
+        df_yil_goster = df_yil.copy()
+        df_yil_goster["Başlangıç TL"] = df_yil_goster["Başlangıç TL"].apply(lambda x: f"{x:,.0f}")
+        df_yil_goster["Bitiş TL"]     = df_yil_goster["Bitiş TL"].apply(lambda x: f"{x:,.0f}")
+        df_yil_goster["K/Z (TL)"]     = df_yil_goster["K/Z (TL)"].apply(lambda x: f"{x:+,.0f}")
+        df_yil_goster["Getiri %"]     = df_yil_goster["Getiri %"].apply(lambda x: f"{x:+.1f}%")
+        df_yil_goster["Win Rate %"]   = df_yil_goster["Win Rate %"].apply(lambda x: f"{x:.1f}%")
+        st.dataframe(df_yil_goster, use_container_width=True, hide_index=True)
+
+    with tab4:
         df_goster = df_i.drop(columns=["Kapanış_dt","Ay"], errors="ignore").copy()
         df_goster["Alış (TL)"]  = df_goster["Alış (TL)"].apply(lambda x: f"{x:,.0f}")
         df_goster["Satış (TL)"] = df_goster["Satış (TL)"].apply(lambda x: f"{x:,.0f}")
