@@ -13,7 +13,10 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 # ─── STRATEJİ PARAMETRELERİ ───────────────────────────────────────────────────
 PORTFOY        = 950_000
 RISK_YUZDESI   = 1.0
-EMA_TOLERANS   = 0.02   # %2 EMA dokunuş toleransı
+EMA_TOLERANS   = 0.02   # %2 — kombinasyon testinde en iyi sonuç
+ATR_KATSAYI    = 1.5    # Stop = Giriş − ATR × 1.5
+RR_KATSAYI     = 1.5    # Hedef = Giriş + 1R × 1.5
+ZAMAN_STOPU    = 30     # gün — backtest sonucuna göre optimize edildi
 ENDEKS_SEMBOL  = "XU100.IS"
 
 # ─── SAPAN STRATEJİSİ TOP50 ───────────────────────────────────────────────────
@@ -281,16 +284,15 @@ def sinyal_tara(df):
     else:
         formasyon = "2 Mum"
 
-    # Giriş / Stop / Hedef
-    giris   = float(onceki["High"])  # onay mumu açıldığında giriş
-    stop1   = round(float(son["Low"]) * 0.998, 2)
-    stop2   = round(float(onceki["Low"]) * 0.998, 2)
-    bir_r   = giris - stop1
+    # Giriş / Stop / Hedef — ATR bazlı (backtest parametreleriyle uyumlu)
+    giris   = float(onceki["High"])
+    atr_val = float(son["ATR"])
+    stop    = round(giris - ATR_KATSAYI * atr_val, 2)
+    bir_r   = giris - stop
     if bir_r <= 0:
         return None
-    hedef   = round(giris + 2.5 * bir_r, 2)
-    stop1_p = round((giris - stop1) / giris * 100, 1)
-    stop2_p = round((giris - stop2) / giris * 100, 1)
+    hedef   = round(giris + RR_KATSAYI * bir_r, 2)
+    stop_p  = round((giris - stop) / giris * 100, 1)
     hedef_p = round((hedef - giris) / giris * 100, 1)
     stoch   = round(float(onceki["STOCH_K"]), 1)
     macd    = round(float(son["MACD"]), 4)
@@ -298,10 +300,8 @@ def sinyal_tara(df):
     return {
         "giris"    : round(giris, 2),
         "kapanis"  : round(float(son["Close"]), 2),
-        "stop1"    : stop1,
-        "stop1_p"  : stop1_p,
-        "stop2"    : stop2,
-        "stop2_p"  : stop2_p,
+        "stop"     : stop,
+        "stop_p"   : stop_p,
         "hedef"    : hedef,
         "hedef_p"  : hedef_p,
         "stoch"    : stoch,
@@ -363,7 +363,7 @@ def main():
         if sonuc is None:
             continue
 
-        risk_hisse = sonuc["giris"] - sonuc["stop1"]
+        risk_hisse = sonuc["giris"] - sonuc["stop"]
         if risk_hisse <= 0:
             continue
         lot      = max(1, int(risk_tl / risk_hisse))
@@ -375,10 +375,8 @@ def main():
             "top50"    : top50,
             "giris"    : sonuc["giris"],
             "kapanis"  : sonuc["kapanis"],
-            "stop1"    : sonuc["stop1"],
-            "stop1_p"  : sonuc["stop1_p"],
-            "stop2"    : sonuc["stop2"],
-            "stop2_p"  : sonuc["stop2_p"],
+            "stop"     : sonuc["stop"],
+            "stop_p"   : sonuc["stop_p"],
             "hedef"    : sonuc["hedef"],
             "hedef_p"  : sonuc["hedef_p"],
             "stoch"    : sonuc["stoch"],
@@ -412,7 +410,7 @@ def main():
     if top50_count > 0:
         baslik += " | " + str(top50_count) + " adet TOP50"
     baslik += "\nPortfoy: " + str(PORTFOY) + " TL | Risk: %" + str(RISK_YUZDESI)
-    baslik += "\nHedef: 2.5R | Zaman Stopu: 18 gun"
+    baslik += "\nATR: " + str(ATR_KATSAYI) + " | R:R 1:" + str(RR_KATSAYI) + " | Zaman Stopu: " + str(ZAMAN_STOPU) + " gun"
     baslik += "\n" + "─" * 22
     baslik += "\n<i>Giris icin onay mumu kapanis beklenmeli!</i>"
     telegram_gonder(baslik)
@@ -422,13 +420,13 @@ def main():
         star   = " STAR " if s["top50"] else ""
         mesaj  = "<b>" + star + s["hisse"] + star + "</b> [" + s["formasyon"] + "]\n"
         mesaj += "Kapanis: " + str(s["kapanis"]) + " TL\n"
-        mesaj += "Giris:   <b>" + str(s["giris"]) + " TL</b> (onay mumu high)\n"
-        mesaj += "Stop 1:  " + str(s["stop1"]) + " (-%" + str(s["stop1_p"]) + ") [dar]\n"
-        mesaj += "Stop 2:  " + str(s["stop2"]) + " (-%" + str(s["stop2_p"]) + ") [genis]\n"
-        mesaj += "Hedef:   " + str(s["hedef"]) + " (+%" + str(s["hedef_p"]) + ") [2.5R]\n"
+        mesaj += "Giris:   <b>" + str(s["giris"]) + " TL</b>\n"
+        mesaj += "Stop:    " + str(s["stop"]) + " (-%" + str(s["stop_p"]) + ")\n"
+        mesaj += "Hedef:   " + str(s["hedef"]) + " (+%" + str(s["hedef_p"]) + ") [" + str(RR_KATSAYI) + "R]\n"
         mesaj += "Stoch:   " + str(s["stoch"]) + " | MACD: " + str(s["macd"]) + "\n"
         mesaj += "Lot:     " + str(s["lot"]) + " adet | " + str(int(s["giris_tl"])) + " TL\n"
-        mesaj += "Risk:    " + str(int(s["risk_tl"])) + " TL"
+        mesaj += "Risk:    " + str(int(s["risk_tl"])) + " TL\n"
+        mesaj += "Zaman Stopu: " + str(ZAMAN_STOPU) + ". gunde kapat"
         telegram_gonder(mesaj)
         print("Sinyal gonderildi:", s["hisse"], "| TOP50:" if s["top50"] else "")
 
