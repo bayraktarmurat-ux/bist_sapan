@@ -14,8 +14,15 @@ st.set_page_config(
 )
 
 # ─── HİSSE LİSTESİ ────────────────────────────────────────────────────────────
-# TOP50 — Sapan Stratejisi backtest sonrası güncellenecek
-TOP50 = set()
+# TOP50 — Sapan Stratejisi backtest sonuçlarına göre en iyi 50 hisse
+# Sıralama: Toplam K/Z (2022-2026 backtest)
+TOP50 = {
+    "BURCE","BURVA","GRTHO","PASEU","CRDFA","BYDNR","BAHKM","BMSCH","AKSUE","ARSAN",
+    "AKYHO","BRSAN","HEDEF","ISGSY","ICUGS","CRFSA","AVTUR","AKSA","KRGYO","BIGCH",
+    "BRKVY","ETYAT","BORLS","BFREN","ULAS","AHGAZ","POLTK","BLCYT","BERA","KLRHO",
+    "FLAP","OYAYO","DCTTR","IEYHO","ISKPL","CCOLA","GZNMI","KUVVA","HURGZ","ARENA",
+    "RTALB","DYOBY","MANAS","DNISI","OZRDN","GLCVY","SANFM","TURGG","CVKMD","GUBRF",
+}
 
 HISSELER = [
     "ACSEL","ADEL","ADESE","ADGYO","AFYON","AGHOL","AGESA","AGROT","AHSGY","AHGAZ",
@@ -286,7 +293,6 @@ def sinyal_tara(df, params):
     6. Higher low (dönüş dibi > son dip) — istisna: derin EMA dokunuşu
     """
     ema_tolerans = params["ema_tolerans"]
-
     df = df.copy()
     for col in ["Open","High","Low","Close","Volume"]:
         if col in df.columns:
@@ -444,26 +450,26 @@ def sinyal_tara(df, params):
         uyarilar.append("⚠️ Range")
 
     # ── GİRİŞ / STOP / HEDEF ─────────────────────────────────────────────────
-    atr_val = float(son["ATR"])
-    stop_1  = round(float(son["Low"]) * 0.998, 2)      # Teyit mumu low - 2 kademe (~%0.2)
-    stop_2  = round(float(onceki["Low"]) * 0.998, 2)   # Dönüş mumu low - 2 kademe
-    stop    = stop_1  # Varsayılan: dar stop
+    atr_val  = float(son["ATR"])
+    atr_kat  = params["atr_kat"]
+    rr_kat   = params["rr_kat"]
 
-    bir_r   = giris - stop
+    giris    = float(onceki["High"])  # onay mumu açılınca giriş
+    kapanis  = float(son["Close"])
+    stop     = round(giris - atr_kat * atr_val, 2)
+    bir_r    = giris - stop
     if bir_r <= 0:
         return None, "stop_hatasi"
 
-    # İdeal 1R: 1-1.5 ATR arası
-    r_oran  = bir_r / atr_val if atr_val > 0 else 0
-
-    hedef_r = 2.0 if uyarilar else 2.5
-    hedef   = round(giris + hedef_r * bir_r, 2)
+    hedef_r  = rr_kat * (0.8 if uyarilar else 1.0)  # direnç varsa hedefi %20 kıs
+    hedef_r  = round(max(1.0, hedef_r), 1)
+    hedef    = round(giris + hedef_r * bir_r, 2)
+    r_oran   = bir_r / atr_val if atr_val > 0 else 0
 
     return {
         "Kapanis"      : round(kapanis, 2),
         "Giris"        : round(giris, 2),
-        "Stop1"        : stop_1,
-        "Stop2"        : stop_2,
+        "Stop"         : stop,
         "Hedef"        : hedef,
         "HedefR"       : hedef_r,
         "1R_TL"        : round(bir_r, 2),
@@ -476,8 +482,7 @@ def sinyal_tara(df, params):
         "Stoch"        : round(float(onceki["STOCH_K"]), 1),
         "MACD"         : round(float(son["MACD"]), 4),
         "DokunulanEMA" : round(dokunulan_ema, 2) if dokunulan_ema else 0,
-        "Stop1%"       : round((giris - stop_1) / giris * 100, 1),
-        "Stop2%"       : round((giris - stop_2) / giris * 100, 1),
+        "Stop%"        : round((giris - stop) / giris * 100, 1),
         "Hedef%"       : round((hedef - giris) / giris * 100, 1),
     }, "ok"
 
@@ -490,11 +495,26 @@ portfoy = st.sidebar.number_input(
 )
 risk_yuzde = st.sidebar.slider("Risk % (1R)", 0.5, 5.0, 1.0, 0.5)
 
-st.sidebar.markdown("### 📊 Parametreler")
-ema_tolerans = st.sidebar.slider(
-    "EMA Dokunuş Toleransı (%)", 0.5, 5.0, 2.0, 0.5,
+st.sidebar.markdown("### 📊 Strateji Parametreleri")
+ema_tolerans = st.sidebar.select_slider(
+    "EMA Dokunuş Toleransı (%)",
+    options=[1, 2, 3],
+    value=2,
     help="Mumun EMA'ya kaç % yakınına gelmesi dokunuş sayılır"
 ) / 100
+
+atr_kat = st.sidebar.select_slider(
+    "ATR Katsayısı (Stop)",
+    options=[1.0, 1.5, 2.0, 2.5, 3.0],
+    value=1.5,
+    help="Stop = Giriş − ATR × Katsayı"
+)
+rr_kat = st.sidebar.select_slider(
+    "R:R Katsayısı",
+    options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+    value=1.5,
+    help="Hedef = Giriş + Stop Mesafesi × R:R"
+)
 
 endeks_bypass = st.sidebar.checkbox(
     "⚠️ Endeks filtresini atla", value=False,
@@ -503,11 +523,13 @@ endeks_bypass = st.sidebar.checkbox(
 
 params = {
     "ema_tolerans": ema_tolerans,
+    "atr_kat"     : atr_kat,
+    "rr_kat"      : rr_kat,
 }
 
 # ─── ANA SAYFA ────────────────────────────────────────────────────────────────
 st.title("📈 BIST Sapan Stratejisi Tarayıcı")
-st.caption("EMA Trend | EMA Dokunuş | Stoch(5,3,3)<30 | MACD(50,100,9) | Price Action | Higher Low")
+st.caption("EMA Trend | EMA Dokunuş | Stoch(5,3,3)<30 | MACD(50,100,9) | Price Action | Higher Low | ATR Stop")
 
 # ─── ENDEKS DURUMU ────────────────────────────────────────────────────────────
 aktif, xu100, xu_ema200, xu_fark = endeks_kontrol()
@@ -576,7 +598,7 @@ if st.button("🔍 Tara", use_container_width=True, type="primary", disabled=tar
             continue
 
         giris      = sonuc["Giris"]
-        stop       = sonuc["Stop1"]
+        stop       = sonuc["Stop"]
         risk_hisse = giris - stop
         if risk_hisse <= 0:
             continue
@@ -592,11 +614,9 @@ if st.button("🔍 Tara", use_container_width=True, type="primary", disabled=tar
             "★"          : "★" if hisse in TOP50 else "",
             "Hisse"      : hisse,
             "Kapanis"    : sonuc["Kapanis"],
-            "Giriş"      : giris,
-            "Stop1"      : sonuc["Stop1"],
-            "Stop1%"     : sonuc["Stop1%"],
-            "Stop2"      : sonuc["Stop2"],
-            "Stop2%"     : sonuc["Stop2%"],
+            "Giriş"      : sonuc["Giris"],
+            "Stop"       : sonuc["Stop"],
+            "Stop%"      : sonuc["Stop%"],
             "Hedef"      : sonuc["Hedef"],
             "Hedef%"     : sonuc["Hedef%"],
             "HedefR"     : sonuc["HedefR"],
@@ -674,8 +694,7 @@ if "sinyaller" in st.session_state:
 
         df_goster = df_sonuc.copy()
         df_goster["Hedef%"] = df_goster["Hedef%"].apply(lambda x: f"+%{x}")
-        df_goster["Stop1%"] = df_goster["Stop1%"].apply(lambda x: f"-%{x}")
-        df_goster["Stop2%"] = df_goster["Stop2%"].apply(lambda x: f"-%{x}")
+        df_goster["Stop%"]  = df_goster["Stop%"].apply(lambda x: f"-%{x}")
         df_goster["HedefR"] = df_goster["HedefR"].apply(lambda x: f"{x}R")
         df_goster["1R_ATR"] = df_goster["1R_ATR"].apply(lambda x: f"{x}x")
         df_goster["📈 Grafik"] = df_goster["Hisse"].apply(
@@ -684,7 +703,7 @@ if "sinyaller" in st.session_state:
 
         st.dataframe(
             df_goster[[
-                "★","Hisse","Kapanis","Giriş","Stop1","Stop1%","Stop2","Stop2%",
+                "★","Hisse","Kapanis","Giriş","Stop","Stop%",
                 "Hedef","Hedef%","HedefR","1R_ATR","Formasyon",
                 "Stoch","MACD","Kalite","KaliteDetay","Uyarılar",
                 "Lot","Giriş TL","Risk TL","📈 Grafik"
@@ -768,10 +787,9 @@ if "sinyaller" in st.session_state:
             son_tarih = df_grafik.index[-1]
             bitis     = son_tarih + timedelta(days=15)
             for seviye, renk, isim in [
-                (secili_sinyal["Stop1"],  "#ef4444", f"Stop1"),
-                (secili_sinyal["Stop2"],  "#f97316", f"Stop2"),
-                (secili_sinyal["Giriş"],  "#facc15", "Giriş"),
-                (secili_sinyal["Hedef"],  "#22c55e", f"Hedef {secili_sinyal['HedefR']}"),
+                (secili_sinyal["Stop"],  "#ef4444", "Stop"),
+                (secili_sinyal["Giriş"], "#facc15", "Giriş"),
+                (secili_sinyal["Hedef"], "#22c55e", f"Hedef {secili_sinyal['HedefR']}R"),
             ]:
                 fig.add_shape(
                     type="line",
@@ -843,10 +861,9 @@ if "sinyaller" in st.session_state:
 |---|---|
 | **Formasyon** | {secili_sinyal['Formasyon']} |
 | **Giriş** | {secili_sinyal['Giriş']:.2f} TL |
-| **Stop 1 (dar)** | {secili_sinyal['Stop1']:.2f} TL (-%{secili_sinyal['Stop1%']}) |
-| **Stop 2 (geniş)** | {secili_sinyal['Stop2']:.2f} TL (-%{secili_sinyal['Stop2%']}) |
-| **Hedef** | {secili_sinyal['Hedef']:.2f} TL (+%{secili_sinyal['Hedef%']}) — {secili_sinyal['HedefR']} |
-| **1R/ATR Oranı** | {secili_sinyal['1R_ATR']} (ideal: 1-1.5x) |
+| **Stop** | {secili_sinyal['Stop']:.2f} TL (-%{secili_sinyal['Stop%']}) |
+| **Hedef** | {secili_sinyal['Hedef']:.2f} TL (+%{secili_sinyal['Hedef%']}) — {secili_sinyal['HedefR']}R |
+| **1R/ATR Oranı** | {secili_sinyal['1R_ATR']}x (ideal: 1-1.5x) |
 | **Stochastic** | {secili_sinyal['Stoch']} |
 | **MACD** | {secili_sinyal['MACD']} |
 | **Kalite** | {secili_sinyal['Kalite']} — {secili_sinyal['KaliteDetay']} |
