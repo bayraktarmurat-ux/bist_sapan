@@ -158,18 +158,53 @@ def sq(s):
     if hasattr(s, "iloc") and s.ndim == 2: s = s.iloc[:, 0]
     return s
 
-def veri_cek(sembol, bas, bit):
-    try:
-        df = yf.download(sembol + ".IS", start=str(bas), end=str(bit),
-                         interval="1d", progress=False, auto_adjust=True)
-        if df is None or df.empty or len(df) < 50: return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df[["Open","High","Low","Close","Volume"]].dropna()
-        for col in df.columns: df[col] = sq(df[col])
-        df.index = df.index.tz_localize(None)
-        return df
-    except Exception: return None
+def toplu_veri_cek(sembol_listesi, bas, bit, batch_size=50):
+    """
+    Hisseleri batch'ler halinde toplu indirir.
+    yf.download() tek istekte birden fazla ticker alabilir → çok daha hızlı.
+    """
+    tum_veriler = {}
+    tikerler = [s + ".IS" for s in sembol_listesi]
+
+    for i in range(0, len(tikerler), batch_size):
+        batch = tikerler[i:i + batch_size]
+        try:
+            df_raw = yf.download(
+                batch,
+                start=str(bas), end=str(bit),
+                interval="1d", progress=False,
+                auto_adjust=True, group_by="ticker",
+            )
+            if df_raw is None or df_raw.empty:
+                continue
+
+            for ticker in batch:
+                sembol = ticker.replace(".IS", "")
+                try:
+                    if len(batch) == 1:
+                        df = df_raw.copy()
+                    else:
+                        if ticker not in df_raw.columns.get_level_values(0):
+                            continue
+                        df = df_raw[ticker].copy()
+
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+
+                    df = df[["Open","High","Low","Close","Volume"]].dropna()
+                    if len(df) < 50:
+                        continue
+
+                    for col in df.columns:
+                        df[col] = sq(df[col])
+                    df.index = df.index.tz_localize(None)
+                    tum_veriler[sembol] = df
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return tum_veriler
 
 def endeks_filtre(bas, bit):
     try:
@@ -507,29 +542,38 @@ if calistir:
         with st.spinner("Endeks verisi indiriliyor..."):
             endeks_f = endeks_filtre(bas_ts, veri_bit)
 
-    # Veri indir & indikatör hesapla (bir kez)
+    # Veri indir & indikatör hesapla (toplu indirme)
     hisse_verileri = {}
-    yuklenemez     = []
-    bar = st.progress(0, text="Hisseler indiriliyor...")
-    for hi, sembol in enumerate(BIST_HISSELER):
-        bar.progress((hi+1)/len(BIST_HISSELER),
-                     text=f"İndiriliyor: {sembol} ({hi+1}/{len(BIST_HISSELER)})")
-        df_raw = veri_cek(sembol,
-                          veri_bas.to_pydatetime().date(),
-                          veri_bit.to_pydatetime().date())
-        if df_raw is None:
-            yuklenemez.append(sembol); continue
-        try:
-            df = ind_hesapla(df_raw.copy(), atr_per, macd_h, macd_y, macd_s)
-            df.dropna(subset=["EMA200","MACD_HIS","STOCH_K","ATR","VOL_ORT"], inplace=True)
-            if len(df) >= 50:
-                hisse_verileri[sembol] = df
-            else:
-                yuklenemez.append(sembol)
-        except Exception:
-            yuklenemez.append(sembol); continue
+    BATCH = 50
+    n_batch = (len(BIST_HISSELER) + BATCH - 1) // BATCH
+    bar   = st.progress(0, text="Hisseler toplu indiriliyor...")
+    durum = st.empty()
+
+    for bi in range(n_batch):
+        batch_semboller = BIST_HISSELER[bi*BATCH : (bi+1)*BATCH]
+        bar.progress(
+            (bi+1)/n_batch,
+            text=f"Batch {bi+1}/{n_batch} indiriliyor... "
+                 f"({bi*BATCH+1}–{min((bi+1)*BATCH, len(BIST_HISSELER))}/{len(BIST_HISSELER)})"
+        )
+        ham = toplu_veri_cek(
+            batch_semboller,
+            veri_bas.to_pydatetime().date(),
+            veri_bit.to_pydatetime().date(),
+            batch_size=BATCH,
+        )
+        for sembol, df_raw in ham.items():
+            try:
+                df = ind_hesapla(df_raw.copy(), atr_per, macd_h, macd_y, macd_s)
+                df.dropna(subset=["EMA200","MACD_HIS","STOCH_K","ATR","VOL_ORT"], inplace=True)
+                if len(df) >= 50:
+                    hisse_verileri[sembol] = df
+            except Exception:
+                continue
+
     bar.empty()
-    st.success(f"✅ {len(hisse_verileri)} hisse yüklendi, {len(yuklenemez)} atlandı.")
+    durum.empty()
+    st.success(f"✅ {len(hisse_verileri)} hisse yüklendi ({n_batch} batch).")
 
     # Sinyaller
     with st.spinner("MACD sinyalleri üretiliyor..."):
