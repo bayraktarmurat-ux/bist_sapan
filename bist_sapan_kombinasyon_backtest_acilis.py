@@ -444,44 +444,58 @@ if st.button("🚀 Kombinasyon Backtest Başlat", use_container_width=True, type
 
     # 2) Hisse verileri (tek seferlik indirme)
     hisse_verileri = {}
-    progress = st.progress(0, text="Hisse verileri indiriliyor...")
+    yuklenemez = []
+    progress = st.progress(0)
+    durum_indir = st.empty()
     for hi, sembol in enumerate(BIST_HISSELER):
         progress.progress(
-            (hi + 1) / len(BIST_HISSELER),
-            text=f"İndiriliyor: {sembol} ({hi+1}/{len(BIST_HISSELER)})"
+            (hi + 1) / len(BIST_HISSELER)
         )
+        durum_indir.info(f"📥 İndiriliyor: **{sembol}** ({hi+1}/{len(BIST_HISSELER)}) | Yüklenen: {len(hisse_verileri)} | Hata: {len(yuklenemez)}")
         df_raw = veri_cek(sembol,
                           veri_bas.to_pydatetime().date(),
                           veri_bit.to_pydatetime().date())
         if df_raw is None:
+            yuklenemez.append(sembol)
             continue
         try:
             df = hesapla_ind(df_raw.copy(), atr_per)
             df.dropna(subset=["EMA200", "STOCH_K", "MACD", "ATR"], inplace=True)
             if len(df) >= 50:
                 hisse_verileri[sembol] = df
+            else:
+                yuklenemez.append(sembol)
         except Exception:
+            yuklenemez.append(sembol)
             continue
     progress.empty()
-    st.success(f"✅ {len(hisse_verileri)} hisse yüklendi.")
+    durum_indir.empty()
+    st.success(f"✅ {len(hisse_verileri)} hisse yüklendi. {len(yuklenemez)} hisse atlandı.")
 
     # 3) Her ATR × Tolerans için sinyalleri üret, her R:R için backtest çalıştır
     sonuclar    = []
     toplam_adim = len(ATR_LISTESI) * len(TOLERANS_LISTESI) * len(RR_LISTESI)
     adim = 0
-    prog2 = st.progress(0, text="Kombinasyonlar hesaplanıyor...")
+    prog2   = st.progress(0)
+    durum   = st.empty()   # detaylı durum satırı
+    ozet    = st.empty()   # ara özet
 
     for tolerans in TOLERANS_LISTESI:
         for atr_kat in ATR_LISTESI:
+            durum.info(f"🔍 Sinyaller üretiliyor... Tolerans %{int(tolerans*100)} | ATR {atr_kat}")
             gunluk_sinyaller = sinyal_uret(
                 hisse_verileri, bas_ts, bit_ts,
                 endeks_f, endeks_aktif, atr_kat, tolerans
             )
+            toplam_sinyal = sum(len(v) for v in gunluk_sinyaller.values())
             for rr_kat in RR_LISTESI:
                 adim += 1
-                prog2.progress(
-                    adim / toplam_adim,
-                    text=f"Tolerans %{int(tolerans*100)} | ATR {atr_kat} | R:R {rr_kat} ({adim}/{toplam_adim})"
+                prog2.progress(adim / toplam_adim)
+                durum.info(
+                    f"⚙️ Backtest çalışıyor... "
+                    f"Tolerans %{int(tolerans*100)} | ATR {atr_kat} | R:R {rr_kat} "
+                    f"| Adım {adim}/{toplam_adim} "
+                    f"| Sinyal: {toplam_sinyal}"
                 )
                 sonuc = backtest_calistir(
                     gunluk_sinyaller, hisse_verileri, bas_ts, bit_ts,
@@ -493,8 +507,18 @@ if st.button("🚀 Kombinasyon Backtest Başlat", use_container_width=True, type
                     "R:R"         : rr_kat,
                     **sonuc
                 })
+                # Her 10 adımda bir ara özet
+                if adim % 10 == 0:
+                    en_iyi = max(sonuclar, key=lambda x: x["Getiri (%)"])
+                    ozet.success(
+                        f"🏆 Şu ana kadar en iyi: "
+                        f"Tolerans %{en_iyi['Tolerans (%)']} | ATR {en_iyi['ATR']} | R:R {en_iyi['R:R']} "
+                        f"→ +{en_iyi['Getiri (%)']:.1f}%"
+                    )
 
     prog2.empty()
+    durum.empty()
+    ozet.empty()
     st.session_state["sonuclar"] = sonuclar
     st.session_state["portfoy0"] = portfoy
 
