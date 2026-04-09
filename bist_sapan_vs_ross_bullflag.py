@@ -68,6 +68,14 @@ def atr_hesapla(df, periyot=14):
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
     return tr.ewm(span=periyot, adjust=False).mean()
 
+def safe_float(val):
+    """DataFrame, Series veya scalar'dan güvenli float çıkar."""
+    if isinstance(val, pd.DataFrame):
+        val = val.iloc[0, 0]
+    elif isinstance(val, pd.Series):
+        val = val.iloc[0]
+    return float(val)
+
 def veri_cek(ticker, baslangic, bitis):
     try:
         df = yf.download(
@@ -341,9 +349,9 @@ def portfoy_backtest(hisseler, baslangic, bitis,
                 continue
 
             gun_verisi = df.loc[bugun]
-            yuksek = float(squeeze(pd.Series([gun_verisi["High"]])).iloc[0])
-            dusuk  = float(squeeze(pd.Series([gun_verisi["Low"]])).iloc[0])
-            kapanis = float(squeeze(pd.Series([gun_verisi["Close"]])).iloc[0])
+            yuksek  = safe_float(gun_verisi["High"])
+            dusuk   = safe_float(gun_verisi["Low"])
+            kapanis = safe_float(gun_verisi["Close"])
 
             # Stop tetiklendi mi?
             if dusuk <= poz["stop"]:
@@ -405,9 +413,7 @@ def portfoy_backtest(hisseler, baslangic, bitis,
                 if sonraki_gun not in df_hisse.index:
                     continue
 
-                acilis = float(squeeze(
-                    pd.Series([df_hisse.loc[sonraki_gun]["Open"]])
-                ).iloc[0])
+                acilis = safe_float(df_hisse.loc[sonraki_gun]["Open"])
 
                 # Açılış gap kontrolü: çok yüksek açılırsa atla
                 if acilis > giris * 1.03:
@@ -446,9 +452,7 @@ def portfoy_backtest(hisseler, baslangic, bitis,
 
         # Günlük sermaye kaydı (açık pozisyonların anlık değeri dahil)
         acik_deger = sum(
-            poz["lot"] * float(squeeze(pd.Series(
-                [tum_veriler[h].loc[bugun]["Close"]]
-            )).iloc[0])
+            poz["lot"] * safe_float(tum_veriler[h].loc[bugun]["Close"])
             for h, poz in pozisyonlar.items()
             if h in tum_veriler and bugun in tum_veriler[h].index
         )
@@ -461,9 +465,7 @@ def portfoy_backtest(hisseler, baslangic, bitis,
     if son_gun:
         for hisse, poz in list(pozisyonlar.items()):
             if hisse in tum_veriler and son_gun in tum_veriler[hisse].index:
-                kapanis = float(squeeze(
-                    pd.Series([tum_veriler[hisse].loc[son_gun]["Close"]])
-                ).iloc[0])
+                kapanis = safe_float(tum_veriler[hisse].loc[son_gun]["Close"])
                 kaz = (kapanis - poz["giris"]) * poz["lot"]
                 islemler.append({
                     "Tarih_Giris" : poz["tarih"],
