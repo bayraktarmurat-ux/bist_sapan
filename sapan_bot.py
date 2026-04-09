@@ -149,12 +149,12 @@ def sapan_hesapla(df):
         return None
 
     return {
-        "giris": round(giris, 2),
-        "stop": round(stop, 2),
-        "hedef": round(hedef, 2),
-        "atr": round(atr, 2),
-        "risk_tl": round(risk, 2),
-        "dusus_gun": dusus_sayisi,
+        "giris": float(round(float(giris), 2)),
+        "stop": float(round(float(stop), 2)),
+        "hedef": float(round(float(hedef), 2)),
+        "atr": float(round(float(atr), 2)),
+        "risk_tl": float(round(float(risk), 2)),
+        "dusus_gun": int(dusus_sayisi),
     }
 
 def hisse_tara(hisse_listesi, progress_bar=None):
@@ -171,7 +171,9 @@ def hisse_tara(hisse_listesi, progress_bar=None):
                 df.columns = df.columns.droplevel(1)
             sonuc = sapan_hesapla(df)
             if sonuc:
-                sinyaller.append({"sembol": sembol, **sonuc,
+                entry = {k: (float(v) if isinstance(v, (int, float)) else v)
+                         for k, v in sonuc.items()}
+                sinyaller.append({"sembol": sembol, **entry,
                                   "tarih": datetime.now().strftime("%Y-%m-%d %H:%M")})
         except Exception:
             pass
@@ -213,19 +215,25 @@ def pozisyon_ac(sinyal, veri):
         return False, f"Maksimum {MAX_POZISYON} pozisyon dolu"
 
     lot_degeri = PORTFOY_BUYUKLUGU * POZISYON_ORANI
-    adet = int(lot_degeri / sinyal["giris"])
+    giris_f = float(sinyal.get("giris") or 0)
+    stop_f  = float(sinyal.get("stop")  or 0)
+    hedef_f = float(sinyal.get("hedef") or 0)
+    atr_f   = float(sinyal.get("atr")   or 0)
+    if giris_f <= 0:
+        return False, "Geçersiz giriş fiyatı (0 veya None)"
+    adet = int(lot_degeri / giris_f)
     if adet < 1:
         return False, "Yetersiz lot"
 
     pozisyon = {
-        "sembol": sinyal["sembol"],
-        "giris": sinyal["giris"],
-        "stop": sinyal["stop"],
-        "hedef": sinyal["hedef"],
-        "adet": adet,
-        "maliyet": round(adet * sinyal["giris"], 2),
-        "tarih": sinyal["tarih"],
-        "atr": sinyal["atr"],
+        "sembol": str(sinyal["sembol"]),
+        "giris": giris_f,
+        "stop":  stop_f,
+        "hedef": hedef_f,
+        "adet":  adet,
+        "maliyet": round(adet * giris_f, 2),
+        "tarih": str(sinyal["tarih"]),
+        "atr":   atr_f,
     }
     veri["acik_pozisyonlar"].append(pozisyon)
     veri_kaydet(veri)
@@ -236,8 +244,10 @@ def pozisyon_kapat(sembol, kapanis_fiyati, veri, neden="Manuel"):
     if not pozisyon:
         return False, "Pozisyon bulunamadı"
 
-    kar_zarar = round((kapanis_fiyati - pozisyon["giris"]) * pozisyon["adet"], 2)
-    kar_yuzde = round((kapanis_fiyati / pozisyon["giris"] - 1) * 100, 2)
+    kap_f = float(kapanis_fiyati)
+    gir_f = float(pozisyon["giris"])
+    kar_zarar = round((kap_f - gir_f) * int(pozisyon["adet"]), 2)
+    kar_yuzde = round((kap_f / gir_f - 1) * 100, 2) if gir_f > 0 else 0.0
 
     kapali = {**pozisyon,
               "kapis_fiyati": kapanis_fiyati,
@@ -260,7 +270,8 @@ def guncel_fiyat_al(sembol):
             return None
         if df.ndim == 2 and isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
-        return float(df["Close"].iloc[-1])
+        val = df["Close"].iloc[-1]
+        return float(val.iloc[0]) if hasattr(val, "iloc") else float(val)
     except Exception:
         return None
 
