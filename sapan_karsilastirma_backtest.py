@@ -75,20 +75,38 @@ def higher_low_k(df, idx, lb=30):
     return False
 
 # ─── VERİ ÇEKME ─────────────────────────────────────────────────────────────
+import time
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def veri_cek(sembol, yil_bas=2022):
-    try:
-        df = yf.download(sembol+".IS", start=f"{yil_bas}-01-01",
-                         interval="1d", progress=False, auto_adjust=True)
-        if df.empty or len(df) < 100: return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df[["Open","High","Low","Close","Volume"]].dropna()
-        for col in df.columns:
-            df[col] = sq(df[col])
-        return df
-    except Exception:
-        return None
+    bekleme = [2, 5, 10]  # saniye — her retry'da artar
+    for deneme, bekle in enumerate(bekleme + [None]):
+        try:
+            df = yf.download(
+                sembol + ".IS",
+                start=f"{yil_bas}-01-01",
+                interval="1d",
+                progress=False,
+                auto_adjust=True,
+            )
+            if df.empty or len(df) < 100:
+                return None
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df = df[["Open","High","Low","Close","Volume"]].dropna()
+            for col in df.columns:
+                df[col] = sq(df[col])
+            return df
+        except Exception as e:
+            hata = str(e).lower()
+            # Rate limit hatasi — bekle ve tekrar dene
+            if "rate" in hata or "too many" in hata or "429" in hata:
+                if bekle is not None:
+                    time.sleep(bekle)
+                    continue
+            # Diger hatalar — direkt None don
+            return None
+    return None
 
 def ind_ekle(df):
     df = df.copy()
@@ -367,15 +385,47 @@ Zaman stopu her senaryoda ayni (varsayilan 30 gun).
     if st.button("🚀 Backtesti Baslat", type="primary", use_container_width=True):
 
         # Veri cek
+        ISTEK_ARASI = 0.4   # saniye — rate limit asimak icin
+        TOPLU_BEKLE = 5     # her 20 hissede bir ek bekleme
+
         with st.status("Veriler cekiliyor...", expanded=True) as status:
-            tum_veri = {}
+            tum_veri  = {}
+            basarisiz = []
+            prog_v    = st.progress(0)
             for i, sem in enumerate(hisseler):
-                st.write(f"{sem} ({i+1}/{len(hisseler)})")
+                prog_v.progress(
+                    (i + 1) / len(hisseler),
+                    text=f"Cekiliyor: {sem} ({i+1}/{len(hisseler)})  "
+                         f"[Basarili: {len(tum_veri)} | Hata: {len(basarisiz)}]"
+                )
                 df_raw = veri_cek(sem, yil_bas)
                 if df_raw is not None:
                     tum_veri[sem] = ind_ekle(df_raw)
-            status.update(label=f"{len(tum_veri)}/{len(hisseler)} hisse hazir.",
-                          state="complete")
+                else:
+                    basarisiz.append(sem)
+
+                time.sleep(ISTEK_ARASI)
+
+                if (i + 1) % 20 == 0 and i + 1 < len(hisseler):
+                    prog_v.progress(
+                        (i + 1) / len(hisseler),
+                        text=f"Rate limit onlemek icin {TOPLU_BEKLE}s bekleniyor..."
+                    )
+                    time.sleep(TOPLU_BEKLE)
+
+            prog_v.empty()
+            ozet_msg = f"{len(tum_veri)}/{len(hisseler)} hisse hazir."
+            if basarisiz:
+                ozet_msg += f" Hata: {', '.join(basarisiz[:8])}"
+                if len(basarisiz) > 8:
+                    ozet_msg += f" +{len(basarisiz)-8} daha"
+            status.update(label=ozet_msg, state="complete")
+
+            if basarisiz:
+                st.warning(
+                    f"{len(basarisiz)} hisse cekilemedi: {', '.join(basarisiz)}  \n"
+                    "Yeniden calistirirsan cache'den gelir, daha hizli olur."
+                )
 
         # Kombinasyon dongusu
         sonuclar = {"A":[], "B":[], "C":[], "D":[]}
