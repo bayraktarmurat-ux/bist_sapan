@@ -465,10 +465,22 @@ Zaman stopu her senaryoda ayni (varsayilan 30 gun).
         prog_t.empty()
 
         st.session_state["sonuclar"] = sonuclar
-        st.success("Backtest tamamlandi!")
 
+        # Sonuclari diske kaydet — sayfa yenilenince kaybolmasin
+        import json as _json
+        with open("sapan_backtest_sonuc.json", "w", encoding="utf-8") as _f:
+            _json.dump(sonuclar, _f, ensure_ascii=False)
+        st.success("Backtest tamamlandi! Sonuclar kaydedildi.")
+
+    # session_state yoksa diskten yukle
     if "sonuclar" not in st.session_state:
-        return
+        import json as _json, os as _os
+        if _os.path.exists("sapan_backtest_sonuc.json"):
+            with open("sapan_backtest_sonuc.json", encoding="utf-8") as _f:
+                st.session_state["sonuclar"] = _json.load(_f)
+            st.info("Onceki backtest sonuclari yuklendi. Yeni backtest icin tekrar calistir.")
+        else:
+            return
 
     sonuclar = st.session_state["sonuclar"]
     RENK     = {"A":"#3b82f6","B":"#10b981","C":"#f59e0b","D":"#ef4444"}
