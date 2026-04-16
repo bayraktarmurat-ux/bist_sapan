@@ -2,7 +2,7 @@ name: BIST Sapan Telegram Bot
 
 on:
   schedule:
-    - cron: '0 17 * * 1-5'
+    - cron: '30 15 * * 1-5'
   workflow_dispatch:
 
 jobs:
