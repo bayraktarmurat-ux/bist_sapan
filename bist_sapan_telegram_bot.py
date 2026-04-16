@@ -156,11 +156,13 @@ def hesapla_ind(df):
     df["ATR"] = pd.concat([hl, hc, lc], axis=1).max(axis=1).ewm(
         span=14, adjust=False).mean()
 
-    # Stochastic (5,3,3)
-    ll    = l.rolling(5).min()
-    hh    = h.rolling(5).max()
-    k_raw = 100 * (c - ll) / (hh - ll + 1e-9)
-    df["STOCH_K"] = k_raw.rolling(3).mean()
+    # Stochastic (5,3,3) — TradingView ile uyumlu
+    ll         = l.rolling(5).min()
+    hh         = h.rolling(5).max()
+    k_raw      = 100 * (c - ll) / (hh - ll + 1e-9)
+    k_smooth   = k_raw.rolling(3).mean()   # Smoothed %K
+    df["STOCH_K"] = k_smooth
+    df["STOCH_D"] = k_smooth.rolling(3).mean()  # %D
 
     # MACD (50,100,9)
     ema_h = c.ewm(span=50,  adjust=False).mean()
