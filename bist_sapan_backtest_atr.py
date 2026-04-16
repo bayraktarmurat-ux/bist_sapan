@@ -167,8 +167,9 @@ def hesapla_ind(df):
     lowest_low   = l.rolling(5).min()
     highest_high = h.rolling(5).max()
     stoch_k_raw  = 100 * (c - lowest_low) / (highest_high - lowest_low + 1e-10)
-    df["STOCH_K"] = stoch_k_raw.rolling(3).mean()
-    df["STOCH_D"] = df["STOCH_K"].rolling(3).mean()
+    k_smooth     = stoch_k_raw.rolling(3).mean()   # Smoothed %K
+    df["STOCH_K"] = k_smooth
+    df["STOCH_D"] = k_smooth.rolling(3).mean()     # %D
 
     # MACD (50, 100, 9)
     ema_h = c.ewm(span=50,  adjust=False).mean()
