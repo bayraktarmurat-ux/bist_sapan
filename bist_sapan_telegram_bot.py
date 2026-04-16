@@ -285,7 +285,7 @@ def sinyal_tara(df):
         formasyon = "2 Mum"
 
     # Giriş / Stop / Hedef — ATR bazlı (backtest parametreleriyle uyumlu)
-    giris   = float(onceki["High"])
+    giris   = float(son["Close"])  # onay mumu kapanışı = giriş
     atr_val = float(son["ATR"])
     stop    = round(giris - ATR_KATSAYI * atr_val, 2)
     bir_r   = giris - stop
