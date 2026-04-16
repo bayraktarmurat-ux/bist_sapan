@@ -454,7 +454,7 @@ def sinyal_tara(df, params):
     atr_kat  = params["atr_kat"]
     rr_kat   = params["rr_kat"]
 
-    giris    = float(onceki["High"])  # onay mumu açılınca giriş
+    giris    = float(son["Close"])   # onay mumu kapanışı = giriş
     kapanis  = float(son["Close"])
     stop     = round(giris - atr_kat * atr_val, 2)
     bir_r    = giris - stop
